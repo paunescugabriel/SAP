@@ -1,0 +1,170 @@
+package ro.ase.ism.sap.exam.tanasie.vlad;
+
+import javax.crypto.Cipher;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.*;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Base64;
+
+public class YourSolution {
+    
+	// Use this static variables to hardcode algorithm names and other important values
+    private static final String HASH_ALGORITHM = "";
+    private static final String HMAC_ALGORITHM = "";
+    private static final String SHARED_SECRET = "sqdy0m-l!t%h1234"; // Secret key for HMAC authentication from the Excel file
+    private static final String AES_ALGORITHM = "";
+    private static final String FOLDER_PATH = "messages";
+
+
+    // Step 1: Generate Digest values of all the files from the given folder
+    public static void generateFilesDigest(String folderPath) throws Exception {
+            File folder=new File(folderPath);
+            File[] files=folder.listFiles();
+            for(File file : files) {
+                MessageDigest md = MessageDigest.getInstance("MD5");
+                byte[] data= Files.readAllBytes(file.toPath());
+                byte[] hash=md.digest(data);
+                StringBuilder sb=new StringBuilder();
+                for(int i=0;i< hash.length;i++){
+                    sb.append(String.format("%02X",hash[i]));
+                }
+                String ASCIIHash=new String(sb.toString());
+                String filename=file.getName();
+                filename=filename.substring(0,filename.length()-4);
+                File fileOut=new File(filename+".digest");
+                BufferedWriter bf=new BufferedWriter(new FileWriter(fileOut));
+                bf.write(ASCIIHash);
+                bf.close();
+            }
+
+    }
+
+    // Step 2: Generate HMAC-SHA256 authentication code
+    public static void generateFilesHMAC(String folderPath, String secretKey) throws Exception {
+        File folder=new File(folderPath);
+        File[] files=folder.listFiles();
+        for(File file : files) {
+            Mac mac= Mac.getInstance("HmacSHA1");
+            SecretKeySpec secretKeySpec=new SecretKeySpec(secretKey.getBytes(),"HmacSHA1");
+            mac.init(secretKeySpec);
+            byte[] macHex=mac.doFinal(Files.readAllBytes(file.toPath()));
+            String filename=file.getName();
+            filename=filename.substring(0,filename.length()-4);
+            String base64File= Base64.getEncoder().encodeToString(macHex);
+            File fileOut=new File(filename+".hmac");
+            BufferedWriter bf=new BufferedWriter(new FileWriter(fileOut));
+            bf.write(base64File);
+            bf.close();
+        }
+    }
+    
+
+    // Step 3: Decrypt and verify the document
+    public static boolean retrieveAndVerifyDocument(String file, String hashFile, String hmacFile, String secretKey) throws Exception {
+        boolean goodHash=false;
+        boolean goodHmac=false;
+        File dataFile=new File(file);
+        MessageDigest md=MessageDigest.getInstance("MD5");
+        byte[] data=Files.readAllBytes(dataFile.toPath());
+        byte[] hash=md.digest(data);
+
+        File fhashFile=new File(hashFile);
+        byte[] hashFile1=Files.readAllBytes(fhashFile.toPath());
+
+        StringBuilder sb=new StringBuilder();
+        for(int i=0;i< hash.length;i++){
+            sb.append(String.format("%02X",hash[i]));
+        }
+        String hashFileString=new String(hashFile1);
+        if(hashFileString.equals(sb.toString())){
+            goodHash=true;
+        }
+
+        Mac mac=Mac.getInstance("HmacSHA1");
+        SecretKeySpec secretKeySpec=new SecretKeySpec(secretKey.getBytes(),"HmacSHA1");
+        mac.init(secretKeySpec);
+        byte[] macHash=mac.doFinal(data);
+        String macHashBase64=Base64.getEncoder().encodeToString(macHash);
+
+        File macFile=new File(hmacFile);
+        byte[] macFileHex=Files.readAllBytes(macFile.toPath());
+        String macFileBase64=new String(macFileHex);
+        if(macFileBase64.equals(macHashBase64)){
+            goodHmac=true;
+        }
+        // Verify HMAC and digest for the given file
+    	// Return true if the files has not been changed
+
+    	if(goodHash && goodHmac){
+            return true;
+        }
+    	return false;
+    }
+    
+    // Step 4: Generate AES key from the shared secret. See Excel for details
+    public static byte[] generateSecretKey(String sharedSecret) throws Exception {
+        byte[] bytes=sharedSecret.getBytes();
+        byte mask=(byte)2;
+        bytes[14]=(byte)(bytes[14]^mask);
+    	return bytes;
+    }
+
+
+    // Step 5: Encrypt document with AES and received key
+    public static void encryptDocument(String filePath, byte[] key) throws Exception {
+        File file=new File(filePath);
+        byte[] data=Files.readAllBytes(file.toPath());
+        Cipher cipher=Cipher.getInstance("AES/ECB/PKCS5Padding");
+        SecretKeySpec secretKeySpec=new SecretKeySpec(key,"AES");
+        cipher.init(Cipher.ENCRYPT_MODE,secretKeySpec);
+        byte[] enc=cipher.doFinal(data);
+        String newFname=file.getName();
+        newFname=newFname.substring(0,newFname.length()-4);
+        File fout=new File(newFname+".enc");
+        BufferedOutputStream bos=new BufferedOutputStream(new FileOutputStream(fout));
+        bos.write(enc);
+        bos.close();
+
+    }
+
+    
+    public static void main(String[] args) {
+
+
+        try {
+            // Step 1: Generate and store file digest
+            generateFilesDigest(FOLDER_PATH);
+
+            // Step 2: Generate and store HMAC for file authentication
+            generateFilesHMAC(FOLDER_PATH, SHARED_SECRET);
+            
+            String filename = "messages/message_1_2qcqxj.txt"; //choose any message.txt file from the folder and test it
+            String hashFile = "message_1_2qcqxj.digest"; //the corresponding hash file
+            String hmacFile = "message_1_2qcqxj.hmac"; //the corresponding hmac file
+            
+            // Step 3: Verify the document
+            retrieveAndVerifyDocument(filename,hashFile,hmacFile,SHARED_SECRET);
+            if (retrieveAndVerifyDocument(filename, hashFile, hmacFile, SHARED_SECRET)) {
+                System.out.println("Document retrieved successfully. Integrity verified.");
+            } else {
+                System.out.println("Document verification failed!");
+            }
+            
+            //Step 3: Change the file content and re-check it to be sure your solution is correct
+            
+            
+            // Step 4: Get the derived key
+            byte[] derivedKey = generateSecretKey(SHARED_SECRET);
+
+            // Step 5: Encrypt the document
+            encryptDocument(filename, derivedKey);
+
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
